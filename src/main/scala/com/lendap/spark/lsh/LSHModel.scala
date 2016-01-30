@@ -58,9 +58,14 @@ class LSHModel(val m: Int, val numHashFunc: Int, val numHashTables: Int,
   }
 
   /** returns candidate set for given vector. */
-  def getCandidates(v: SparseVector): RDD[Long] = {
+  def getCandidates(v: SparseVector): List[Long] = {
     val hashVal = hashValue(v)
-    hashTables.filter(x => hashVal contains x._1).map(x => x._2)
+    hashVal.flatMap {
+      case (band, hash) =>
+        val strKey = s"$band:$hash"
+        hashesId.get(strKey)
+    }.flatten
+    //hashTables.filter(x => hashVal contains x._1).map(x => x._2)
   }
 
   /** adds a new sparse vector with vector Id: vId to the model. */

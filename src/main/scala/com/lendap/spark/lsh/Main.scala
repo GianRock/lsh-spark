@@ -73,7 +73,7 @@ object Main extends App {
   println(hashValues)
 
   //query LSH model for candidate set
-  val candidateList = model.getCandidates(sampleVector).collect()
+  val candidateList = model.getCandidates(sampleVector)
   println(candidateList.toList)
 
   //compute similarity of sampleVector with users in candidate set

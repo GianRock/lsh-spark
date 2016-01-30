@@ -30,7 +30,7 @@ class LSH(data: RDD[(Long, SparseVector)] = null, m: Int = 0, numHashFunc: Int =
         .map(x => (x._1, x._2.map(_._2).mkString(""))).toList
 
     //create a new model object
-    val dataRDD = data.cache()
+//    val dataRDD = data.cache()
 
     //compute hash keys for each vector
     // - hash each vector numHashFunc times

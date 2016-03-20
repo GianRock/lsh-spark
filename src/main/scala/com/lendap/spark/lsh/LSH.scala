@@ -44,12 +44,19 @@ class LSH(data: RDD[(Long, SparseVector)] = null, m: Int = 0, numHashFunc: Int =
 
 
     val hashFunctions: IndexedSeq[( Int,Hasher)] = (0 until numHashFunc * numHashTables).map(i => (i,Hasher(m)))
+    /**
+      * sending the collection of hasher in broadcast to the nodes, is much way efficient
+      * because the collection is sent only once to each node.
+      */
     val broascastHashFunctions: Broadcast[IndexedSeq[( Int,Hasher)]] = sc.broadcast(hashFunctions)
 
 
 
     //val dataRDD = data.cache()
-
+    /*
+    partitioning the hashtables through the band number
+    improve the aggreagation on the band.
+     */
     val hashTables: RDD[((Int, String), Long)] = data.flatMap {
       case (id, sparseVector) =>
         hashVector(sparseVector, broascastHashFunctions).map((_,id))

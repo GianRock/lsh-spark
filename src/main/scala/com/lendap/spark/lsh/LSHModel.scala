@@ -27,8 +27,9 @@ import edu.berkeley.cs.amplab.spark.indexedrdd.IndexedRDD._
   *
   **/
 class LSHModel(val m: Int, val numHashFunc: Int, val numHashTables: Int,
-               val hashFunctions: Seq[(Hasher, Int)], var hashTables: RDD[((Int, String), Long)])
+               val hashFunctions: Seq[(Int,Hasher )], var hashTables: RDD[((Int, String), Long)])
   extends Serializable with Saveable {
+
 
   private val idHashes = IndexedRDD(hashTables.map(x => (x._2, x._1)).groupByKey()).cache()
   private val hashesId = IndexedRDD(hashTables.groupByKey().map {
@@ -41,13 +42,13 @@ class LSHModel(val m: Int, val numHashFunc: Int, val numHashTables: Int,
 
   /** hash a single vector against an existing model and return the candidate buckets */
   def filter(data: SparseVector, model: LSHModel, itemID: Long): RDD[Long] = {
-    val hashKey = hashFunctions.map(h => h._1.hash(data)).mkString("")
+    val hashKey = hashFunctions.map(h => h._2.hash(data)).mkString("")
     hashTables.filter(x => x._1._2 == hashKey).map(a => a._2)
   }
 
   /** creates hashValue for each hashTable. */
   def hashValue(data: SparseVector): List[(Int, String)] =
-    hashFunctions.map(a => (a._2 % numHashTables, a._1.hash(data)))
+    hashFunctions.map(a => (a._1 % numHashTables, a._2.hash(data)))
       .groupBy(_._1)
       .map(x => (x._1, x._2.map(_._2).mkString(""))).toList
 
@@ -109,7 +110,7 @@ object LSHModel {
 
       //save hash functions as (hashTableId, randomVector)
       sc.parallelize(model.hashFunctions
-        .map(x => (x._2, x._1.r.mkString(",")))
+        .map(x => (x._2, x._2.r.mkString(",")))
         .map(_.productIterator.mkString(",")))
         .saveAsTextFile(Loader.hasherPath(path))
 
@@ -130,10 +131,10 @@ object LSHModel {
       val hashTables = sc.textFile(Loader.dataPath(path))
         .map(x => x.split(","))
         .map(x => ((x(0).toInt, x(1)), x(2).toLong))
-      val hashers = sc.textFile(Loader.hasherPath(path))
+      val hashers= sc.textFile(Loader.hasherPath(path))
         .map(a => a.split(","))
         .map(x => (x.head, x.tail))
-        .map(x => (new Hasher(x._2.map(_.toDouble)), x._1.toInt)).collect().toList
+        .map(x => ( x._1.toInt,new Hasher(x._2.map(_.toDouble)))).collect().toList
       val numBands = hashTables.map(x => x._1._1).distinct.count()
       val numHashFunc = hashers.size / numBands
 

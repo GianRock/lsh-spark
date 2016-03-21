@@ -4,7 +4,7 @@ package com.lendap.spark.lsh
   * Created by maytekin on 06.08.2015.
   */
 
-import org.apache.hadoop.fs.Path
+ import org.apache.hadoop.fs.Path
 import org.apache.spark.SparkContext
 import org.apache.spark.mllib.linalg.SparseVector
 import org.apache.spark.rdd.RDD
@@ -95,64 +95,75 @@ object LSHModel {
     LSHModel.SaveLoadV0_0_1.load(sc, path)
   }
 
-  private[lsh] object SaveLoadV0_0_1 {
+  private [lsh] object SaveLoadV0_0_1 {
 
     private val thisFormatVersion = "0.0.1"
     private val thisClassName = this.getClass.getName()
 
     def save(sc: SparkContext, model: LSHModel, path: String): Unit = {
-
+      /*
+      SAVE ALSO NUMBANDS AND NUMROWS
+       */
       val metadata =
-        compact(render(("class" -> thisClassName) ~ ("version" -> thisFormatVersion)))
+        compact(render(("class" -> thisClassName) ~ ("version" -> thisFormatVersion) ~ ("numHashTables" -> model.numHashTables)
+          ~ ("numHashFunc" -> model.numHashFunc)))
 
       //save metadata info
       sc.parallelize(Seq(metadata), 1).saveAsTextFile(Loader.metadataPath(path))
 
       //save hash functions as (hashTableId, randomVector)
-      sc.parallelize(model.hashFunctions
-        .map(x => (x._2, x._2.r.mkString(",")))
-        .map(_.productIterator.mkString(",")))
-        .saveAsTextFile(Loader.hasherPath(path))
+      val textHasFunctions: RDD[String] =sc.parallelize(model.hashFunctions.map {
+        case(band,hasher)=>band+"-"+hasher.r.map{x=>if(x) '0' else '1'}.mkString("")
+      })
+
+
+      textHasFunctions .saveAsTextFile(Loader.hasherPath(path))
 
       //save data as (hashTableId#, hashValue, vectorId)
-      model.hashTables
-        .map(x => (x._1._1, x._1._2, x._2))
-        .map(_.productIterator.mkString(","))
-        .saveAsTextFile(Loader.dataPath(path))
-
+      //      model.hashTables
+      //        .map(x => (x._1._1, x._1._2, x._2))
+      //        .map(_.productIterator.mkString(","))
+      //        .saveAsTextFile(Loader.dataPath(path))
+      model.hashTables.saveAsObjectFile(Loader.dataPath(path))
     }
 
     def load(sc: SparkContext, path: String): LSHModel = {
 
       implicit val formats = DefaultFormats
-      val (className, formatVersion, metadata) = Loader.loadMetadata(sc, path)
+      val (className, formatVersion, numBands,numHashFunc,metadata) = Loader.loadMetadata(sc, path)
       assert(className == thisClassName)
       assert(formatVersion == thisFormatVersion)
-      val hashTables = sc.textFile(Loader.dataPath(path))
-        .map(x => x.split(","))
-        .map(x => ((x(0).toInt, x(1)), x(2).toLong))
-      val hashers= sc.textFile(Loader.hasherPath(path))
-        .map(a => a.split(","))
-        .map(x => (x.head, x.tail))
-        .map(x => ( x._1.toInt,new Hasher(x._2.map(_.toDouble)))).collect().toList
-      val numBands = hashTables.map(x => x._1._1).distinct.count()
-      val numHashFunc = hashers.size / numBands
+      //      val hashTables = sc.textFile(Loader.dataPath(path))
+      //        .map(x => x.split(","))
+      //        .map(x => ((x(0).toInt, x(1)), x(2).toLong))
+      val hashTables=sc.objectFile[((Int,String),Long)] (Loader.dataPath(path))
+
+      //  val hashers=parts.map(x => (Hasher(x._2), x._1.toInt)).collect().toList
+
+
+      val hashers: Array[(Int, Hasher)] = sc.textFile(Loader.hasherPath(path))
+        .map(a => a.split("-"))
+        .map(x => ( x.head.toInt,Hasher(x.apply(1)))).collect()
+      // println(hashers.foreach(x=>println(x._1.r+"  band "+x._2)))
+    //  val numBands = hashTables.map(x => x._1._1).distinct.count()
+   //   val numHashFunc = hashers.size / numBands
 
       //Validate loaded data
       //check size of data
-      assert(hashTables.count != 0, s"Loaded hashTable data is empty")
+   //   assert(hashTables.count != 0, s"Loaded hashTable data is empty")
       //check size of hash functions
-      assert(hashers.nonEmpty, s"Loaded hasher data is empty")
+      assert(hashers.size != 0, s"Loaded hasher data is empty")
       //check hashValue size. Should be equal to numHashFunc
       assert(hashTables.map(x => x._1._2).filter(x => x.size != numHashFunc).collect().size == 0,
         s"hashValues in data does not match with hash functions")
 
       //create model
-      val model = new LSHModel(0, numHashFunc.toInt, numBands.toInt, hashers, hashTables)
+      val model = new LSHModel(0, numHashFunc.toInt, numBands.toInt,hashers,hashTables)
+
+
       model
     }
   }
-
 }
 
 
@@ -169,17 +180,14 @@ private[lsh] object Loader {
   /** Returns URI for path/metadata using the Hadoop filesystem */
   def hasherPath(path: String): String = new Path(path, "hasher").toUri.toString
 
-  /**
-    * Load metadata from the given path.
-    *
-    * @return (class name, version, metadata)
-    */
-  def loadMetadata(sc: SparkContext, path: String): (String, String, JValue) = {
+  def loadMetadata(sc: SparkContext, path: String): (String, String, Int, Int, JValue) = {
     implicit val formats = DefaultFormats
     val metadata = parse(sc.textFile(metadataPath(path)).first())
     val clazz = (metadata \ "class").extract[String]
     val version = (metadata \ "version").extract[String]
-    (clazz, version, metadata)
+    val numHashTables = (metadata \ "numHashTables").values.asInstanceOf[BigInt].toInt
+    val numHashFuncs = (metadata \ "numHashFunc").values.asInstanceOf[BigInt].toInt
+    (clazz, version, numHashTables,numHashFuncs,metadata)
   }
 
 }
